@@ -1,0 +1,15 @@
+[package]
+name = "keystone"
+version = "0.1.0"
+edition = "2021"
+description = "A durable, ordered, embedded LSM-tree key value store in pure std Rust with crash recovery"
+license = "MIT"
+repository = "https://github.com/pavanchow/keystone"
+
+[[bin]]
+name = "keystone"
+path = "src/bin/keystone.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
