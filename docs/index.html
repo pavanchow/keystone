@@ -336,6 +336,37 @@ footer a { font-weight: 500; }
         </div>
       </div>
     </div>
+
+    <style>
+    .guide { margin-top: 28px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px 30px; box-shadow: var(--shadow-sm); }
+    .guide-head h3 { margin: 0 0 6px; font-size: 20px; letter-spacing: -0.01em; }
+    .guide-head p { margin: 0 0 18px; color: var(--text-soft); font-size: 15px; }
+    .guide-steps { margin: 0; padding-left: 22px; display: grid; gap: 12px; }
+    .guide-steps li { color: var(--text-soft); font-size: 15px; line-height: 1.55; }
+    .guide-steps li b { color: var(--text); font-weight: 600; }
+    .kbd { font-family: var(--mono); font-size: 12.5px; background: var(--bg-sunken); border: 1px solid var(--border-strong); border-radius: 7px; padding: 2px 7px; color: var(--text); white-space: nowrap; }
+    .guide-try { margin-top: 20px; padding: 16px 18px; border-radius: var(--radius-sm); background: var(--accent-soft); border: 1px solid var(--accent-ring); color: var(--text-soft); font-size: 14.5px; line-height: 1.6; }
+    .guide-try b { color: var(--text); }
+    @media (max-width: 720px){ .guide { padding: 22px; } }
+    </style>
+    <div class="guide">
+      <div class="guide-head">
+        <h3>How to use this playground</h3>
+        <p>Every panel updates live after each action. Here is what each control does and what to watch for.</p>
+      </div>
+      <ol class="guide-steps">
+        <li><b>Put a key.</b> Type a key and a value in the first two boxes, then press <span class="kbd">Put</span>. The pair lands at the top of the memtable, a record is appended to the write-ahead log, and the sequence number ticks up. Put the same key again with a new value to watch the newer version win.</li>
+        <li><b>Get a key.</b> Type a key in the third box and press <span class="kbd">Get</span>. Follow the read path trace at the bottom right. It checks the memtable first, then each on-disk level from newest to oldest, and shows every bloom filter it consults saying "no" and skipping, or "maybe" and reading. The table that answers is highlighted. Try a key you never wrote, like <span class="kbd">ghost</span>, to see a full miss.</li>
+        <li><b>Delete a key.</b> Type a key and press <span class="kbd">Delete</span>. Nothing is erased. Keystone writes a tombstone, a marker that shadows older values. Get the same key afterward and the trace ends at the tombstone with not found.</li>
+        <li><b>Flush the memtable.</b> Press <span class="kbd">Flush</span> to turn the in-memory memtable into an immutable SSTable at level 0. The memtable empties, the log rotates, and a new card appears in L0 with its key range and bloom filter. The memtable also flushes on its own once it reaches 8 entries.</li>
+        <li><b>Compact.</b> Press <span class="kbd">Compact</span> to merge SSTables downward, L0 into L1, L1 into L2, and onward. Overlapping tables merge, older versions drop, and tombstones are discarded once they reach the bottom level. Compaction also runs on its own when L0 reaches 4 tables.</li>
+        <li><b>Random workload.</b> Press <span class="kbd">Random workload</span> to fire a burst of puts and deletes so you can watch the levels fill and compaction kick in by itself.</li>
+        <li><b>Reset.</b> Press <span class="kbd">Reset</span> to clear everything and start again from an empty store.</li>
+      </ol>
+      <div class="guide-try">
+        <b>A two minute tour.</b> Put <span class="kbd">user:42 = alice</span>, then Get <span class="kbd">user:42</span> and see it hit the memtable. Press Flush, then Get again and watch it now come from an L0 SSTable after the bloom filter says maybe. Put <span class="kbd">user:42 = bob</span>, Flush, then Get once more to see the newer version win across two tables. Delete <span class="kbd">user:42</span>, Get to see the tombstone, then Compact until it reaches the bottom level and the key is gone for good.
+      </div>
+    </div>
   </div>
 </section>
 
