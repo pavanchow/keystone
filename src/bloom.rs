@@ -9,7 +9,7 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 fn fnv1a(data: &[u8], seed: u64) -> u64 {
     let mut hash = seed;
     for &b in data {
-        hash ^= b as u64;
+        hash ^= u64::from(b);
         hash = hash.wrapping_mul(FNV_PRIME);
     }
     hash
@@ -25,6 +25,7 @@ pub struct Bloom {
 
 impl Bloom {
     /// Build a filter sized for `num_keys` at `bits_per_key`.
+    #[must_use]
     pub fn new(num_keys: usize, bits_per_key: usize) -> Self {
         let mut num_bits = (num_keys * bits_per_key.max(1)) as u64;
         if num_bits < 64 {
@@ -44,7 +45,7 @@ impl Bloom {
         let h1 = fnv1a(key, FNV_OFFSET_A);
         let h2 = fnv1a(key, FNV_OFFSET_B) | 1;
         let num_bits = self.num_bits;
-        (0..self.k).map(move |i| h1.wrapping_add((i as u64).wrapping_mul(h2)) % num_bits)
+        (0..self.k).map(move |i| h1.wrapping_add(u64::from(i).wrapping_mul(h2)) % num_bits)
     }
 
     /// Record `key` as a member.
@@ -56,6 +57,7 @@ impl Bloom {
     }
 
     /// Return true if `key` may be present, false if it is definitely absent.
+    #[must_use]
     pub fn may_contain(&self, key: &[u8]) -> bool {
         for bit in self.probes(key) {
             if self.bits[(bit / 8) as usize] & (1 << (bit % 8)) == 0 {
@@ -65,7 +67,8 @@ impl Bloom {
         true
     }
 
-    /// Serialize to bytes: [u64 num_bits][u32 k][bit bytes].
+    /// Serialize to bytes: [u64 `num_bits`][u32 k][bit bytes].
+    #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(12 + self.bits.len());
         out.extend_from_slice(&self.num_bits.to_le_bytes());
@@ -85,8 +88,13 @@ impl Bloom {
         if num_bits != (bits.len() as u64) * 8 {
             return Err(Error::corruption("bloom bit length mismatch"));
         }
-        if k == 0 {
-            return Err(Error::corruption("bloom k is zero"));
+        // num_bits == 0 would make the probe modulo divide by zero; an
+        // out-of-range probe count would waste unbounded work per lookup.
+        if num_bits == 0 {
+            return Err(Error::corruption("bloom has zero bits"));
+        }
+        if k == 0 || k > 64 {
+            return Err(Error::corruption("bloom k out of range"));
         }
         Ok(Bloom { bits, num_bits, k })
     }
@@ -121,8 +129,27 @@ mod tests {
                 fp += 1;
             }
         }
-        let rate = fp as f64 / trials as f64;
+        let rate = f64::from(fp) / f64::from(trials);
         assert!(rate < 0.05, "false positive rate too high: {rate}");
+    }
+
+    #[test]
+    fn zero_bits_header_rejected_not_panic() {
+        // A crafted 12 byte header with num_bits == 0 must be rejected, never
+        // accepted into a filter whose probe modulo would divide by zero.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0u64.to_le_bytes());
+        buf.extend_from_slice(&1u32.to_le_bytes());
+        assert!(Bloom::from_bytes(&buf).is_err());
+    }
+
+    #[test]
+    fn out_of_range_k_rejected() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&64u64.to_le_bytes());
+        buf.extend_from_slice(&9999u32.to_le_bytes());
+        buf.extend_from_slice(&[0u8; 8]);
+        assert!(Bloom::from_bytes(&buf).is_err());
     }
 
     #[test]

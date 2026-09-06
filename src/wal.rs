@@ -13,6 +13,11 @@ use crate::error::{Error, Result};
 use crate::types::ValueType;
 use crate::varint;
 
+// A record larger than this in the length prefix is treated as a corrupt or
+// torn tail rather than trusted, so a bit-flipped length cannot trigger a
+// multi-gigabyte allocation before the CRC is ever checked.
+const MAX_RECORD_LEN: usize = 64 * 1024 * 1024;
+
 /// A logical operation recovered from the log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalRecord {
@@ -126,12 +131,16 @@ impl WalReader {
         loop {
             let mut header = [0u8; 8];
             match read_exact_or_eof(&mut self.reader, &mut header)? {
-                ReadState::Eof => break,
-                ReadState::Short => break,
+                ReadState::Eof | ReadState::Short => break,
                 ReadState::Full => {}
             }
             let len = u32::from_le_bytes(header[0..4].try_into().unwrap()) as usize;
             let expected_crc = u32::from_le_bytes(header[4..8].try_into().unwrap());
+            // A corrupt length prefix must not drive a huge allocation: an
+            // implausible length is a torn or corrupt tail, so stop cleanly.
+            if len > MAX_RECORD_LEN {
+                break;
+            }
             let mut payload = vec![0u8; len];
             match read_exact_or_eof(&mut self.reader, &mut payload)? {
                 ReadState::Full => {}
