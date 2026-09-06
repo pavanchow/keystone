@@ -1,4 +1,4 @@
-//! Durable catalog of live SSTables, written with an atomic temp-then-rename.
+//! Durable catalog of live `SSTables`, written with an atomic temp-then-rename.
 
 use std::fs;
 use std::io::Write;
@@ -42,6 +42,7 @@ pub struct Manifest {
 
 impl Manifest {
     /// Create an empty manifest for a fresh database.
+    #[must_use]
     pub fn empty() -> Self {
         Manifest {
             next_file_id: 1,
@@ -65,7 +66,7 @@ impl Manifest {
         body.extend_from_slice(&self.next_seqno.to_le_bytes());
         varint::encode_u64(self.tables.len() as u64, &mut body);
         for t in &self.tables {
-            varint::encode_u64(t.level as u64, &mut body);
+            varint::encode_u64(u64::from(t.level), &mut body);
             body.extend_from_slice(&t.file_id.to_le_bytes());
             varint::encode_bytes(&t.smallest_key, &mut body);
             varint::encode_bytes(&t.largest_key, &mut body);
@@ -157,11 +158,13 @@ impl Manifest {
     }
 
     /// Tables at a given level.
+    #[must_use]
     pub fn tables_at(&self, level: u32) -> Vec<&TableMeta> {
         self.tables.iter().filter(|t| t.level == level).collect()
     }
 
     /// Highest level that currently holds any table.
+    #[must_use]
     pub fn max_level(&self) -> u32 {
         self.tables.iter().map(|t| t.level).max().unwrap_or(0)
     }

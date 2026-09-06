@@ -29,10 +29,11 @@ impl Table {
 static TABLE: Table = Table::new();
 
 /// Compute the CRC32 (IEEE) checksum of `data`.
+#[must_use]
 pub fn crc32(data: &[u8]) -> u32 {
     let mut crc: u32 = 0xFFFF_FFFF;
     for &b in data {
-        let idx = ((crc ^ b as u32) & 0xff) as usize;
+        let idx = ((crc ^ u32::from(b)) & 0xff) as usize;
         crc = (crc >> 8) ^ TABLE.0[idx];
     }
     crc ^ 0xFFFF_FFFF

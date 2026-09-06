@@ -1,4 +1,4 @@
-//! Gate 1: a random op stream checked against a BTreeMap oracle after every op.
+//! Gate 1: a random op stream checked against a `BTreeMap` oracle after every op.
 
 use std::collections::BTreeMap;
 

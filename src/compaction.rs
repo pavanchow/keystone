@@ -17,7 +17,8 @@ use crate::options::Options;
 use crate::sstable::{SsTableReader, SsTableWriter};
 use crate::types::{Entry, ValueType};
 
-/// Path of the SSTable file for `id` inside `dir`.
+/// Path of the `SSTable` file for `id` inside `dir`.
+#[must_use]
 pub fn sst_path(dir: &Path, id: u64) -> PathBuf {
     dir.join(format!("{id:06}.sst"))
 }
@@ -44,10 +45,10 @@ fn combined_range(metas: &[&TableMeta]) -> Option<(Vec<u8>, Vec<u8>)> {
     let mut lo: Option<Vec<u8>> = None;
     let mut hi: Option<Vec<u8>> = None;
     for m in metas {
-        if lo.as_ref().map(|l| &m.smallest_key < l).unwrap_or(true) {
+        if lo.as_ref().is_none_or(|l| &m.smallest_key < l) {
             lo = Some(m.smallest_key.clone());
         }
-        if hi.as_ref().map(|h| &m.largest_key > h).unwrap_or(true) {
+        if hi.as_ref().is_none_or(|h| &m.largest_key > h) {
             hi = Some(m.largest_key.clone());
         }
     }

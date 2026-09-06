@@ -3,11 +3,11 @@
 /// Configuration for a Keystone database.
 #[derive(Debug, Clone)]
 pub struct Options {
-    /// Flush the memtable to an L0 SSTable once it exceeds this many bytes.
+    /// Flush the memtable to an L0 `SSTable` once it exceeds this many bytes.
     pub memtable_size_bytes: usize,
-    /// Target size for a packed SSTable data block.
+    /// Target size for a packed `SSTable` data block.
     pub block_size: usize,
-    /// Bits allocated per key in each SSTable bloom filter.
+    /// Bits allocated per key in each `SSTable` bloom filter.
     pub bloom_bits_per_key: usize,
     /// Number of L0 files that triggers a compaction into L1.
     pub l0_compaction_trigger: usize,
@@ -32,41 +32,48 @@ impl Default for Options {
 
 impl Options {
     /// Start from the defaults.
+    #[must_use]
     pub fn new() -> Self {
         Options::default()
     }
 
     /// Set the memtable flush threshold in bytes.
+    #[must_use]
     pub fn memtable_size_bytes(mut self, v: usize) -> Self {
         self.memtable_size_bytes = v;
         self
     }
 
-    /// Set the target SSTable data block size in bytes.
+    /// Set the target `SSTable` data block size in bytes.
+    #[must_use]
     pub fn block_size(mut self, v: usize) -> Self {
         self.block_size = v;
         self
     }
 
     /// Set bloom filter bits per key.
+    #[must_use]
     pub fn bloom_bits_per_key(mut self, v: usize) -> Self {
         self.bloom_bits_per_key = v;
         self
     }
 
     /// Set the L0 file count that triggers compaction.
+    #[must_use]
     pub fn l0_compaction_trigger(mut self, v: usize) -> Self {
         self.l0_compaction_trigger = v;
         self
     }
 
     /// Set the per level size multiplier.
+    #[must_use]
     pub fn level_size_multiplier(mut self, v: u64) -> Self {
         self.level_size_multiplier = v;
         self
     }
 
     /// Set whether every write fsyncs the WAL.
+    #[must_use]
     pub fn sync_on_write(mut self, v: bool) -> Self {
         self.sync_on_write = v;
         self

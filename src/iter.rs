@@ -21,7 +21,7 @@ impl MergeIterator {
     pub fn new(sources: Vec<Source>) -> Result<Self> {
         let mut heads = Vec::with_capacity(sources.len());
         let mut sources = sources;
-        for s in sources.iter_mut() {
+        for s in &mut sources {
             heads.push(match s.next() {
                 Some(Ok(e)) => Some(e),
                 Some(Err(e)) => return Err(e),
@@ -55,16 +55,13 @@ impl Iterator for MergeIterator {
         // Smallest key currently at any head.
         let mut min_key: Option<Vec<u8>> = None;
         for h in self.heads.iter().flatten() {
-            if min_key.as_ref().map(|m| &h.key < m).unwrap_or(true) {
+            if min_key.as_ref().is_none_or(|m| &h.key < m) {
                 min_key = Some(h.key.clone());
             }
         }
-        let min_key = match min_key {
-            Some(k) => k,
-            None => {
-                self.done = true;
-                return None;
-            }
+        let Some(min_key) = min_key else {
+            self.done = true;
+            return None;
         };
 
         // Among all heads at that key, pick the newest and consume them all.
@@ -74,7 +71,7 @@ impl Iterator for MergeIterator {
             if let Some(e) = h {
                 if e.key == min_key {
                     to_advance.push(i);
-                    if winner.as_ref().map(|w| e.seqno > w.seqno).unwrap_or(true) {
+                    if winner.as_ref().is_none_or(|w| e.seqno > w.seqno) {
                         winner = Some(e.clone());
                     }
                 }

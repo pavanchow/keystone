@@ -8,6 +8,7 @@ pub struct Rng {
 
 impl Rng {
     /// Create a generator from `seed` (zero is remapped to a nonzero state).
+    #[must_use]
     pub fn new(seed: u64) -> Self {
         Rng {
             state: if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed },

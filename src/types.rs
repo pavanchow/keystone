@@ -1,4 +1,4 @@
-//! Internal record types shared across the memtable, SSTables and iterators.
+//! Internal record types shared across the memtable, `SSTables` and iterators.
 
 /// Whether a versioned record stores a value or marks a deletion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,11 +11,13 @@ pub enum ValueType {
 
 impl ValueType {
     /// Encode as the on-disk tag byte.
+    #[must_use]
     pub fn as_u8(self) -> u8 {
         self as u8
     }
 
     /// Decode from the on-disk tag byte.
+    #[must_use]
     pub fn from_u8(v: u8) -> Option<ValueType> {
         match v {
             0 => Some(ValueType::Put),

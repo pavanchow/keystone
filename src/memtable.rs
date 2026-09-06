@@ -1,4 +1,4 @@
-//! In-memory sorted table backed by a std BTreeMap.
+//! In-memory sorted table backed by a std `BTreeMap`.
 
 use std::collections::BTreeMap;
 
@@ -13,6 +13,7 @@ pub struct MemTable {
 
 impl MemTable {
     /// Create an empty memtable.
+    #[must_use]
     pub fn new() -> Self {
         MemTable {
             map: BTreeMap::new(),
@@ -22,7 +23,7 @@ impl MemTable {
 
     fn charge(key: &[u8], value: Option<&[u8]>) -> usize {
         // Rough per-entry accounting: keys, value, seqno and map overhead.
-        key.len() + value.map(|v| v.len()).unwrap_or(0) + 24
+        key.len() + value.map_or(0, <[u8]>::len) + 24
     }
 
     /// Insert or overwrite a put for `key` at `seqno`.
@@ -51,21 +52,25 @@ impl MemTable {
     /// Look up the newest version of `key` held in memory.
     ///
     /// Returns `Some(None)` for a tombstone and `Some(Some(v))` for a value.
+    #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<Option<Vec<u8>>> {
         self.map.get(key).map(|(_, v)| v.clone())
     }
 
     /// Approximate byte footprint used against the flush threshold.
+    #[must_use]
     pub fn approx_size(&self) -> usize {
         self.approx_size
     }
 
     /// True when no writes are buffered.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
 
     /// Number of distinct keys buffered.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.map.len()
     }

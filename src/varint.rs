@@ -34,7 +34,7 @@ pub fn decode_u64(buf: &[u8], pos: &mut usize) -> Result<u64> {
         if shift == 63 && (byte & 0x7e) != 0 {
             return Err(Error::corruption("varint overflow"));
         }
-        result |= ((byte & 0x7f) as u64) << shift;
+        result |= u64::from(byte & 0x7f) << shift;
         if byte & 0x80 == 0 {
             break;
         }
@@ -44,6 +44,7 @@ pub fn decode_u64(buf: &[u8], pos: &mut usize) -> Result<u64> {
 }
 
 /// Number of bytes `value` occupies when varint encoded.
+#[must_use]
 pub fn encoded_len(value: u64) -> usize {
     let mut v = value;
     let mut n = 1;
@@ -87,7 +88,7 @@ mod tests {
             128,
             300,
             16384,
-            u32::MAX as u64,
+            u64::from(u32::MAX),
             u64::MAX / 2,
             u64::MAX - 1,
             u64::MAX,
@@ -107,11 +108,11 @@ mod tests {
     fn sequential_encode_decode() {
         let mut buf = Vec::new();
         for v in 0u64..2000 {
-            encode_u64(v.wrapping_mul(2654435761), &mut buf);
+            encode_u64(v.wrapping_mul(2_654_435_761), &mut buf);
         }
         let mut pos = 0;
         for v in 0u64..2000 {
-            assert_eq!(decode_u64(&buf, &mut pos).unwrap(), v.wrapping_mul(2654435761));
+            assert_eq!(decode_u64(&buf, &mut pos).unwrap(), v.wrapping_mul(2_654_435_761));
         }
         assert_eq!(pos, buf.len());
     }

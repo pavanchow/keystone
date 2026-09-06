@@ -131,7 +131,7 @@ fn reopen_after_clean_flush_empty_wal() {
         db.flush().unwrap();
         db.compact().unwrap();
         // After a flush the WAL is rotated and empty on disk.
-        let wal_len = std::fs::metadata(dir.join("wal.log")).map(|m| m.len()).unwrap_or(0);
+        let wal_len = std::fs::metadata(dir.join("wal.log")).map_or(0, |m| m.len());
         assert_eq!(wal_len, 0, "wal should be empty after flush");
         db.close().unwrap();
     }
