@@ -10,7 +10,7 @@ Keystone is a log-structured merge tree. This document describes the components,
 - `bloom` is a bloom filter using double hashing over two FNV-1a base hashes.
 - `memtable` is an in-memory sorted table over a `BTreeMap`, tracking approximate byte size.
 - `wal` is the write-ahead log with framed, checksummed records and torn-tail discard.
-- `sstable` is the immutable on-disk sorted string table with data blocks, an index block, a bloom block, and a footer.
+- `sstable` is the immutable on-disk sorted string table with per-block CRC checked data blocks, an index block, a bloom block, and a checksummed footer.
 - `manifest` is the durable catalog of live tables, committed with an atomic temp-then-rename.
 - `iter` is a k-way merge that yields the newest version per user key.
 - `compaction` is the leveled compaction driver.
@@ -44,27 +44,33 @@ The value is absent for a delete. All fixed integers are little endian. The leng
 [data block 0][data block 1]...[index block][bloom block][footer]
 ```
 
-A data block packs sorted entries up to roughly `block_size` bytes. Each entry is:
+Every block on disk, whether a data block, the index block, or the bloom block, is stored as its payload followed by a 4 byte CRC32 trailer over that payload:
+
+```
+[block payload][u32 crc32(payload)]
+```
+
+A data block payload packs sorted entries up to roughly `block_size` bytes. Each entry is:
 
 ```
 [varint klen][key][u64 seqno][u8 type][varint vlen][value]
 ```
 
-The index block starts with a varint count, then one record per data block:
+The index block payload starts with a varint count, then one record per data block. The stored length is the payload length, and the reader adds the CRC trailer:
 
 ```
-[varint klen][first_key][u64 block_off][u64 block_len]
+[varint klen][first_key][u64 block_off][u64 block_payload_len]
 ```
 
-The bloom block is the serialized filter over every key in the table, laid out as `[u64 num_bits][u32 k][bit bytes]`.
+The bloom block payload is the serialized filter over every key in the table, laid out as `[u64 num_bits][u32 k][bit bytes]`.
 
-The footer is a fixed 40 bytes at the very end:
+The footer is a fixed 44 bytes at the very end:
 
 ```
-[u64 index_off][u64 index_len][u64 bloom_off][u64 bloom_len][u64 magic]
+[u64 index_off][u64 index_len][u64 bloom_off][u64 bloom_len][u32 crc32(first 32 bytes)][u64 magic]
 ```
 
-Reading starts at the footer, which locates the index and bloom, so the reader loads those two structures and then serves point lookups and iteration from the data blocks.
+Reading starts at the footer. The magic and the footer CRC are checked first, so a corrupt set of offsets is rejected before any of them is used. The four offsets and lengths are the payload offset and payload length of the index and bloom blocks. Each block read bounds the offset and length against the file size before allocating, then verifies the block CRC, so a corrupt or truncated file fails with a clean error instead of over-allocating, panicking, or returning a wrong value. The reader loads the index and bloom, then serves point lookups and iteration from the data blocks.
 
 ### Manifest
 
@@ -107,6 +113,15 @@ Durability rests on four mechanisms.
 - Atomic manifest commit. A new catalog is written to a temp file, fsynced, then renamed over MANIFEST. Rename is atomic on a single filesystem, so a reader always sees either the whole old manifest or the whole new one, never a mix. A crash between the temp write and the rename leaves the committed manifest untouched.
 - Flush ordering. On flush the new SSTable is written and fsynced, then the manifest is committed, and only then is the WAL rotated. A crash at any point leaves either the WAL still holding the data or the SSTable already committed, so the data is never in neither place.
 
+## Integrity and corruption resistance
+
+Durability protects against a crash. Integrity protects against on-disk bytes that are wrong, whether from a torn write, a failing disk, a stray bit flip, or a hand-edited file. Keystone treats every persisted structure as untrusted input on read.
+
+- Checksums everywhere. WAL records are framed with a CRC32, the manifest carries a trailing CRC32 over its whole body, and each SSTable block plus the SSTable footer carries its own CRC32. Any single-byte corruption in a table breaks exactly one CRC and is caught on read, so a bit flip surfaces as a corruption error rather than a wrong answer.
+- Bounded allocation. Every decoder validates any length it reads against the file size or a fixed cap before it allocates. A corrupt SSTable footer whose index length has been flipped to a huge value is rejected by the footer CRC and the bounds check, not by an attempt to allocate terabytes. A corrupt WAL length prefix is capped and treated as a torn tail rather than a giant buffer.
+- Clean failure. A corrupt or truncated structure returns a `Corruption` error. The WAL is the one place that recovers by design, dropping the torn or corrupt tail so every intact earlier record survives. No decoder panics, overflows, hangs, or reads out of bounds on adversarial input.
+- Whole-store verify. `Db::verify`, exposed as the `verify` CLI command, opens every live table and reads every block end to end, which forces every block CRC and every entry decode, and reports the tables and entries checked or the first corruption found.
+
 ## Why the gates prove it
 
 ### The differential gate proves functional correctness
@@ -123,4 +138,8 @@ The torn-write case writes records that live only in the WAL, then truncates the
 
 The clean-flush case flushes, confirms the WAL is empty, closes, and reopens to the exact flushed state, which proves the flush-then-rotate ordering leaves a consistent store with data served entirely from SSTables.
 
-Together the two gates cover the two things an LSM must get right. The differential gate proves the query semantics over the full layered structure, and the recovery gate proves the on-disk state survives a crash and reloads to the same logical contents.
+### The corruption gate proves robustness against bad bytes
+
+The corruption gate builds a valid WAL, SSTable, and manifest, then mutates each one exhaustively. It flips a bit at every byte offset, truncates at every length, injects adversarial length prefixes, and throws random garbage files at every reader. For each mutation it runs the reader under a panic guard and classifies the outcome. The invariant is that reading corrupt bytes never panics and never returns wrong data. It either reproduces the original bytes exactly or fails with a clean error, and for the WAL it yields a prefix of the original records. Because every SSTable byte lives inside a CRC covered block or the checksummed footer, the sweep shows every SSTable mutation being detected rather than served as a wrong answer, which is exactly the property the block checksums exist to provide.
+
+Together the three gates cover what an LSM must get right. The differential gate proves the query semantics over the full layered structure, the recovery gate proves the on-disk state survives a crash and reloads to the same logical contents, and the corruption gate proves that damaged on-disk bytes fail loudly and safely instead of silently corrupting a read.
