@@ -1,3 +1,7 @@
+#![warn(clippy::pedantic)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)] // the Error enum is the documented error surface for every fallible call
+#![allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_sign_loss, clippy::cast_precision_loss)] // every cast is on-disk format math bounded by parse-time invariant checks
+
 //! # Keystone
 //!
 //! Keystone is a durable, ordered, embedded key value store built on a
@@ -6,7 +10,7 @@
 //!
 //! Writes land in a write-ahead log and an in-memory sorted memtable. When the
 //! memtable fills it is flushed to an immutable on-disk sorted string table
-//! (SSTable) at level 0. Leveled compaction merges tables downward, dropping
+//! (`SSTable`) at level 0. Leveled compaction merges tables downward, dropping
 //! shadowed versions and tombstones at the bottom level. A durable manifest,
 //! committed with an atomic temp-then-rename, records the live tables and the
 //! monotonic sequence number so the store recovers exactly across a crash.
@@ -43,7 +47,7 @@ pub mod types;
 pub mod varint;
 pub mod wal;
 
-pub use db::{Db, LevelStat, Scan, Stats};
+pub use db::{Db, LevelStat, Scan, Stats, VerifyReport};
 pub use error::{Error, Result};
 pub use options::Options;
 pub use rng::Rng;

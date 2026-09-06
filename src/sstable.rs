@@ -17,7 +17,11 @@ use crate::types::{Entry, ValueType};
 use crate::varint;
 
 const MAGIC: u64 = 0x4B45_5953_544F_4E45; // "KEYSTONE"
-const FOOTER_LEN: u64 = 40;
+// Footer: [u64 index_off][u64 index_len][u64 bloom_off][u64 bloom_len]
+//         [u32 crc32(first 32 bytes)][u64 magic].
+const FOOTER_LEN: u64 = 44;
+// Every block (data, index, bloom) carries a trailing CRC32 over its payload.
+const BLOCK_CRC_LEN: u64 = 4;
 
 /// Summary statistics produced when a table is finished.
 #[derive(Debug, Clone)]
@@ -108,7 +112,7 @@ impl SsTableWriter {
         if self.smallest_key.is_none() {
             self.smallest_key = Some(e.key.clone());
         }
-        self.largest_key = e.key.clone();
+        self.largest_key.clone_from(&e.key);
         self.min_seq = self.min_seq.min(e.seqno);
         self.max_seq = self.max_seq.max(e.seqno);
         self.count += 1;
@@ -129,10 +133,13 @@ impl SsTableWriter {
             return Ok(());
         }
         let first = self.block_first_key.take().unwrap();
-        let len = self.block_buf.len() as u64;
+        let payload_len = self.block_buf.len() as u64;
+        let crc = crate::crc::crc32(&self.block_buf);
         self.writer.write_all(&self.block_buf)?;
-        self.index.push((first, self.offset, len));
-        self.offset += len;
+        self.writer.write_all(&crc.to_le_bytes())?;
+        // The index records the payload length; the reader adds the CRC trailer.
+        self.index.push((first, self.offset, payload_len));
+        self.offset += payload_len + BLOCK_CRC_LEN;
         self.block_buf.clear();
         Ok(())
     }
@@ -149,25 +156,31 @@ impl SsTableWriter {
             index_buf.extend_from_slice(&off.to_le_bytes());
             index_buf.extend_from_slice(&len.to_le_bytes());
         }
+        let index_crc = crate::crc::crc32(&index_buf);
         self.writer.write_all(&index_buf)?;
+        self.writer.write_all(&index_crc.to_le_bytes())?;
         let index_len = index_buf.len() as u64;
-        self.offset += index_len;
+        self.offset += index_len + BLOCK_CRC_LEN;
 
         let mut bloom = Bloom::new(self.keys.len(), self.bloom_bits_per_key);
         for k in &self.keys {
             bloom.add(k);
         }
         let bloom_buf = bloom.to_bytes();
+        let bloom_crc = crate::crc::crc32(&bloom_buf);
         let bloom_off = self.offset;
         self.writer.write_all(&bloom_buf)?;
+        self.writer.write_all(&bloom_crc.to_le_bytes())?;
         let bloom_len = bloom_buf.len() as u64;
-        self.offset += bloom_len;
+        self.offset += bloom_len + BLOCK_CRC_LEN;
 
         let mut footer = Vec::with_capacity(FOOTER_LEN as usize);
         footer.extend_from_slice(&index_off.to_le_bytes());
         footer.extend_from_slice(&index_len.to_le_bytes());
         footer.extend_from_slice(&bloom_off.to_le_bytes());
         footer.extend_from_slice(&bloom_len.to_le_bytes());
+        let footer_crc = crate::crc::crc32(&footer);
+        footer.extend_from_slice(&footer_crc.to_le_bytes());
         footer.extend_from_slice(&MAGIC.to_le_bytes());
         self.writer.write_all(&footer)?;
         self.offset += FOOTER_LEN;
@@ -189,12 +202,17 @@ impl SsTableWriter {
 /// Reader over a finished table. Loads footer, index and bloom eagerly.
 pub struct SsTableReader {
     file: File,
+    file_len: u64,
     index: Vec<(Vec<u8>, u64, u64)>,
     bloom: Bloom,
 }
 
 impl SsTableReader {
     /// Open and parse the table at `path`.
+    ///
+    /// The footer, index and bloom carry CRC32 trailers and the footer offsets
+    /// are bounds checked against the file length, so a corrupt or truncated
+    /// file fails with a clean error instead of over-allocating or panicking.
     pub fn open(path: &Path) -> Result<Self> {
         let mut file = File::open(path)?;
         let file_len = file.metadata()?.len();
@@ -204,16 +222,20 @@ impl SsTableReader {
         file.seek(SeekFrom::End(-(FOOTER_LEN as i64)))?;
         let mut footer = [0u8; FOOTER_LEN as usize];
         file.read_exact(&mut footer)?;
+        let magic = u64::from_le_bytes(footer[36..44].try_into().unwrap());
+        if magic != MAGIC {
+            return Err(Error::corruption("sst bad magic"));
+        }
+        let footer_crc = u32::from_le_bytes(footer[32..36].try_into().unwrap());
+        if crate::crc::crc32(&footer[0..32]) != footer_crc {
+            return Err(Error::corruption("sst footer crc mismatch"));
+        }
         let index_off = u64::from_le_bytes(footer[0..8].try_into().unwrap());
         let index_len = u64::from_le_bytes(footer[8..16].try_into().unwrap());
         let bloom_off = u64::from_le_bytes(footer[16..24].try_into().unwrap());
         let bloom_len = u64::from_le_bytes(footer[24..32].try_into().unwrap());
-        let magic = u64::from_le_bytes(footer[32..40].try_into().unwrap());
-        if magic != MAGIC {
-            return Err(Error::corruption("sst bad magic"));
-        }
 
-        let index_raw = read_at(&mut file, index_off, index_len as usize)?;
+        let index_raw = read_block(&mut file, index_off, index_len, file_len)?;
         let mut pos = 0;
         let n = varint::decode_u64(&index_raw, &mut pos)? as usize;
         let mut index = Vec::with_capacity(n);
@@ -232,10 +254,15 @@ impl SsTableReader {
             index.push((key, off, len));
         }
 
-        let bloom_raw = read_at(&mut file, bloom_off, bloom_len as usize)?;
+        let bloom_raw = read_block(&mut file, bloom_off, bloom_len, file_len)?;
         let bloom = Bloom::from_bytes(&bloom_raw)?;
 
-        Ok(SsTableReader { file, index, bloom })
+        Ok(SsTableReader {
+            file,
+            file_len,
+            index,
+            bloom,
+        })
     }
 
     /// Point lookup honoring the bloom filter and block index.
@@ -243,12 +270,11 @@ impl SsTableReader {
         if !self.bloom.may_contain(key) {
             return Ok(None);
         }
-        let block_idx = match self.find_block(key) {
-            Some(i) => i,
-            None => return Ok(None),
+        let Some(block_idx) = self.find_block(key) else {
+            return Ok(None);
         };
         let (_, off, len) = self.index[block_idx].clone();
-        let block = read_at(&mut self.file, off, len as usize)?;
+        let block = read_block(&mut self.file, off, len, self.file_len)?;
         let mut pos = 0;
         while pos < block.len() {
             let e = decode_entry(&block, &mut pos)?;
@@ -269,7 +295,7 @@ impl SsTableReader {
         let mut lo = 0usize;
         let mut hi = self.index.len();
         while lo < hi {
-            let mid = (lo + hi) / 2;
+            let mid = usize::midpoint(lo, hi);
             if self.index[mid].0.as_slice() <= key {
                 lo = mid + 1;
             } else {
@@ -280,10 +306,14 @@ impl SsTableReader {
     }
 
     /// Iterate all entries in ascending key order.
+    // Returns a Result because cloning the file handle can fail; the inner
+    // SsTableIter is the actual Iterator.
+    #[allow(clippy::iter_not_returning_iterator)]
     pub fn iter(&self) -> Result<SsTableIter> {
         let file = self.file.try_clone()?;
         Ok(SsTableIter {
             file,
+            file_len: self.file_len,
             index: self.index.clone(),
             block_idx: 0,
             block: Vec::new(),
@@ -296,6 +326,7 @@ impl SsTableReader {
 /// Forward iterator over every entry in a table.
 pub struct SsTableIter {
     file: File,
+    file_len: u64,
     index: Vec<(Vec<u8>, u64, u64)>,
     block_idx: usize,
     block: Vec<u8>,
@@ -307,7 +338,7 @@ impl SsTableIter {
     fn load_block(&mut self) -> Result<bool> {
         while self.block_idx < self.index.len() {
             let (_, off, len) = self.index[self.block_idx].clone();
-            self.block = read_at(&mut self.file, off, len as usize)?;
+            self.block = read_block(&mut self.file, off, len, self.file_len)?;
             self.block_pos = 0;
             self.block_idx += 1;
             if !self.block.is_empty() {
@@ -337,10 +368,26 @@ impl Iterator for SsTableIter {
     }
 }
 
-fn read_at(file: &mut File, off: u64, len: usize) -> Result<Vec<u8>> {
+// Read a payload of `payload_len` bytes at `off` plus its 4 byte CRC trailer,
+// verifying both the file bounds (before allocating) and the checksum.
+fn read_block(file: &mut File, off: u64, payload_len: u64, file_len: u64) -> Result<Vec<u8>> {
+    let end = off
+        .checked_add(payload_len)
+        .and_then(|v| v.checked_add(BLOCK_CRC_LEN))
+        .ok_or_else(|| Error::corruption("sst block length overflow"))?;
+    if end > file_len {
+        return Err(Error::corruption("sst block out of bounds"));
+    }
+    let total = (payload_len + BLOCK_CRC_LEN) as usize;
     file.seek(SeekFrom::Start(off))?;
-    let mut buf = vec![0u8; len];
+    let mut buf = vec![0u8; total];
     file.read_exact(&mut buf)?;
+    let payload_len = payload_len as usize;
+    let want = u32::from_le_bytes(buf[payload_len..].try_into().unwrap());
+    buf.truncate(payload_len);
+    if crate::crc::crc32(&buf) != want {
+        return Err(Error::corruption("sst block crc mismatch"));
+    }
     Ok(buf)
 }
 
@@ -376,7 +423,7 @@ mod tests {
         let path = tmp("rt");
         let _ = std::fs::remove_file(&path);
         let mut entries: Vec<Entry> = (0..500u32)
-            .map(|i| entry(&format!("key{i:04}"), i as u64, Some(&format!("val{i}"))))
+            .map(|i| entry(&format!("key{i:04}"), u64::from(i), Some(&format!("val{i}"))))
             .collect();
         entries.push(entry("key0250", 999, None));
         entries.sort_by(|a, b| a.key.cmp(&b.key));

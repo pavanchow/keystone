@@ -1,4 +1,5 @@
 //! Command line interface for the Keystone key value store.
+#![warn(clippy::pedantic)]
 
 use std::process::exit;
 
@@ -16,6 +17,7 @@ commands:\n\
   scan [prefix]         print sorted key=value pairs, optionally by prefix\n\
   compact               run pending compactions\n\
   stats                 print level layout, file counts, sizes, seqno\n\
+  verify                check every sstable block CRC and report integrity\n\
   demo                  run a scripted workload and print the LSM state"
     );
     exit(2);
@@ -116,6 +118,14 @@ fn run(args: &Args) -> keystone::Result<()> {
         "stats" => {
             print_stats(&args.path)?;
         }
+        "verify" => {
+            let db = Db::open(&args.path, opts)?;
+            let report = db.verify()?;
+            println!(
+                "ok: {} tables, {} entries verified",
+                report.tables, report.entries
+            );
+        }
         "demo" => {
             run_demo(&args.path)?;
         }
@@ -148,7 +158,7 @@ fn run_demo(path: &str) -> keystone::Result<()> {
         .level_size_multiplier(4);
     let mut db = Db::open(path, opts)?;
 
-    let mut rng = Rng::new(0xC1FEB00C);
+    let mut rng = Rng::new(0xC1FE_B00C);
     println!("== writing 4000 random puts over 400 keys ==");
     for _ in 0..4000 {
         let k = format!("user:{:04}", rng.below(400));

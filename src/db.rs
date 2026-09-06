@@ -1,4 +1,4 @@
-//! The Keystone engine: memtable, WAL, SSTables, manifest and compaction wired
+//! The Keystone engine: memtable, WAL, `SSTables`, manifest and compaction wired
 //! into a durable ordered key value store.
 
 use std::collections::HashMap;
@@ -37,14 +37,23 @@ pub struct LevelStat {
     pub bytes: u64,
 }
 
+/// Result of a full integrity scan over every live table.
+#[derive(Debug, Clone, Copy)]
+pub struct VerifyReport {
+    /// Number of tables read end to end.
+    pub tables: usize,
+    /// Number of entries decoded across all tables.
+    pub entries: u64,
+}
+
 /// A snapshot of engine state for the CLI `stats` command.
 #[derive(Debug, Clone)]
 pub struct Stats {
     /// Per-level file counts and sizes.
     pub levels: Vec<LevelStat>,
-    /// Total live SSTable files.
+    /// Total live `SSTable` files.
     pub total_files: usize,
-    /// Total live SSTable bytes.
+    /// Total live `SSTable` bytes.
     pub total_bytes: u64,
     /// Next sequence number to be assigned.
     pub next_seqno: u64,
@@ -172,7 +181,7 @@ impl Db {
         Ok(())
     }
 
-    /// Write the memtable to a new L0 SSTable, commit the manifest and rotate
+    /// Write the memtable to a new L0 `SSTable`, commit the manifest and rotate
     /// the WAL. A no-op when the memtable is empty.
     pub fn flush(&mut self) -> Result<()> {
         if self.mem.is_empty() {
@@ -252,7 +261,27 @@ impl Db {
         Ok(())
     }
 
+    /// Verify on-disk integrity by reading every block of every live table.
+    ///
+    /// Each data, index and bloom block carries a CRC32 that is checked as it
+    /// is read, so any silent corruption surfaces here as an error rather than
+    /// as a wrong answer at query time.
+    pub fn verify(&self) -> Result<VerifyReport> {
+        let mut tables = 0usize;
+        let mut entries = 0u64;
+        for meta in &self.manifest.tables {
+            let reader = SsTableReader::open(&compaction::sst_path(&self.dir, meta.file_id))?;
+            for item in reader.iter()? {
+                item?;
+                entries += 1;
+            }
+            tables += 1;
+        }
+        Ok(VerifyReport { tables, entries })
+    }
+
     /// Snapshot of engine state for inspection.
+    #[must_use]
     pub fn stats(&self) -> Stats {
         let max_level = self.manifest.max_level();
         let mut levels = Vec::new();
