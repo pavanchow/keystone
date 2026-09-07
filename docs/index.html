@@ -3,8 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keystone: a durable, ordered LSM-tree key-value store from scratch in Rust</title>
+<meta name="description" content="Keystone by Pavan Nallamothu: a durable, ordered, embedded key-value store written from scratch in pure Rust with zero dependencies. A real log-structured merge tree with a write-ahead log, leveled compaction, bloom filters, and exact crash recovery. Put keys, flush, compact, and trace a read live in your browser.">
+<meta name="author" content="Pavan Nallamothu (pavanchow)">
+<link rel="canonical" href="https://pavanchow.github.io/keystone/">
 <link rel="icon" type="image/svg+xml" href="logo.svg">
-<title>Keystone — a durable LSM-tree key-value store you can watch work</title>
+<link rel="author" href="https://github.com/pavanchow">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Keystone: a durable, ordered LSM-tree key-value store from scratch in Rust">
+<meta property="og:description" content="A durable, ordered, embedded key-value store built on a log-structured merge tree, zero dependencies. Write-ahead log, leveled compaction, bloom filters, exact crash recovery. Watch it work, live. By Pavan Nallamothu.">
+<meta property="og:url" content="https://pavanchow.github.io/keystone/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Keystone: a durable, ordered LSM-tree key-value store from scratch in Rust">
+<meta name="twitter:description" content="A glass-box LSM tree you can read end to end. Watch the memtable fill, flush to L0, compact, and trace a Get.">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Keystone","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","description":"Keystone is a durable, ordered, embedded key-value store written from scratch in pure Rust with zero external dependencies. It is a real log-structured merge tree: writes go to a write-ahead log and an in-memory sorted table, flush to immutable on-disk sorted string tables, and merge downward through leveled compaction, with exact crash recovery.","url":"https://pavanchow.github.io/keystone/","author":{"@type":"Person","name":"Pavan Nallamothu"},"programmingLanguage":"Rust","codeRepository":"https://github.com/pavanchow/keystone","license":"https://opensource.org/licenses/MIT"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Person","name":"Pavan Nallamothu","alternateName":"pavanchow","url":"https://github.com/pavanchow","sameAs":["https://github.com/pavanchow","https://hackerone.com/pavanchow"]}
+</script>
 <style>
 :root {
   --bg: #f5f5f7;
@@ -247,6 +264,8 @@ footer a { font-weight: 500; }
 </head>
 <body>
 
+<noscript><div class="wrap" style="padding:40px 24px;color:var(--text-mute)">Keystone is a durable, ordered, embedded key-value store written from scratch in pure Rust with zero external dependencies. It is a real log-structured merge tree: a write-ahead log, an in-memory sorted memtable, immutable on-disk SSTables, leveled compaction, bloom filters, and exact crash recovery. Source: <a href="https://github.com/pavanchow/keystone">github.com/pavanchow/keystone</a>.</div></noscript>
+
 <nav>
   <div class="wrap nav-inner">
     <div class="brand"><span class="dot"></span> Keystone</div>
@@ -262,8 +281,8 @@ footer a { font-weight: 500; }
 <header class="hero wrap">
   <img src="logo.svg" alt="Keystone logo" width="72" height="72">
   <span class="eyebrow">Durable · Ordered · Embedded · Zero dependencies</span>
-  <h1>Keystone</h1>
-  <p class="tagline">A durable, ordered key-value store built on a log-structured merge tree that you can actually watch work.</p>
+  <h1>Watch a store<br>keep its word.</h1>
+  <p class="tagline">Keystone is a durable, ordered key-value store built on a log-structured merge tree, written from scratch in pure Rust with zero dependencies. You can actually watch it work.</p>
   <p class="sub">No server. No dependencies. Real crash recovery. It lives inside your program as a library and survives a hard kill, so the data you wrote is still there when you open it again.</p>
   <div class="cta">
     <a class="btn btn-primary" href="#playground">Open the playground</a>
@@ -423,6 +442,8 @@ footer a { font-weight: 500; }
       <a href="https://github.com/pavanchow/keystone">GitHub</a>
     </div>
     <p>Keystone is an embedded, durable, ordered key-value store. The playground is a teaching model of the engine, not the engine itself.</p>
+    <p>Keystone is MIT licensed. Source, tests, and design notes are on <a href="https://github.com/pavanchow/keystone">GitHub</a>.</p>
+    <p>By <span style="color:var(--text);font-weight:600">Pavan Nallamothu</span>.</p>
   </div>
 </footer>
 
