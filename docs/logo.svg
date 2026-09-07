@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Keystone logo">
+  <defs>
+    <linearGradient id="ky-stone" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9aa3af"/>
+      <stop offset="1" stop-color="#5f6874"/>
+    </linearGradient>
+    <linearGradient id="ky-key" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#37a0ff"/>
+      <stop offset="1" stop-color="#0060d0"/>
+    </linearGradient>
+  </defs>
+  <g stroke="#2b323c" stroke-width="2.4" stroke-linejoin="round">
+    <!-- voussoirs forming the arch crown -->
+    <polygon points="38,92 42.97,76.7 25.2,63.8 16,92" fill="url(#ky-stone)"/>
+    <polygon points="42.97,76.7 55.97,67.3 49.2,46.4 25.2,63.8" fill="url(#ky-stone)"/>
+    <polygon points="72.03,67.3 85.03,76.7 102.8,63.8 78.8,46.4" fill="url(#ky-stone)"/>
+    <polygon points="85.03,76.7 90,92 112,92 102.8,63.8" fill="url(#ky-stone)"/>
+    <!-- the keystone, crowning the arch -->
+    <polygon points="55.97,67.3 72.03,67.3 78.8,46.4 49.2,46.4" fill="url(#ky-key)"/>
+  </g>
+  <!-- ground line -->
+  <rect x="12" y="96" width="104" height="8" rx="4" fill="url(#ky-stone)" stroke="#2b323c" stroke-width="2.4"/>
+</svg>

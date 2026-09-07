@@ -1,3 +1,5 @@
+<img src="docs/logo.svg" alt="Keystone logo" width="96">
+
 # Keystone
 
 Keystone is a durable, ordered, embedded key value store written from scratch in pure Rust with zero external dependencies. It is a real log-structured merge tree (LSM), not a hashmap with save and load. Writes go to a write-ahead log and an in-memory sorted table, flush to immutable on-disk sorted string tables, and merge downward through leveled compaction. It recovers exactly across a crash.

@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="logo.svg">
 <title>Keystone — a durable LSM-tree key-value store you can watch work</title>
 <style>
 :root {
@@ -259,6 +260,7 @@ footer a { font-weight: 500; }
 </nav>
 
 <header class="hero wrap">
+  <img src="logo.svg" alt="Keystone logo" width="72" height="72">
   <span class="eyebrow">Durable · Ordered · Embedded · Zero dependencies</span>
   <h1>Keystone</h1>
   <p class="tagline">A durable, ordered key-value store built on a log-structured merge tree that you can actually watch work.</p>
@@ -350,8 +352,9 @@ footer a { font-weight: 500; }
     @media (max-width: 720px){ .guide { padding: 22px; } }
     </style>
     <div class="guide">
+      <details>
+      <summary>How to use this playground</summary>
       <div class="guide-head">
-        <h3>How to use this playground</h3>
         <p>Every panel updates live after each action. Here is what each control does and what to watch for.</p>
       </div>
       <ol class="guide-steps">
@@ -366,6 +369,7 @@ footer a { font-weight: 500; }
       <div class="guide-try">
         <b>A two minute tour.</b> Put <span class="kbd">user:42 = alice</span>, then Get <span class="kbd">user:42</span> and see it hit the memtable. Press Flush, then Get again and watch it now come from an L0 SSTable after the bloom filter says maybe. Put <span class="kbd">user:42 = bob</span>, Flush, then Get once more to see the newer version win across two tables. Delete <span class="kbd">user:42</span>, Get to see the tombstone, then Compact until it reaches the bottom level and the key is gone for good.
       </div>
+      </details>
     </div>
   </div>
 </section>
