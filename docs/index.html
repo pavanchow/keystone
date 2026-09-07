@@ -638,7 +638,7 @@ footer a { font-weight: 500; }
     $("memMeta").textContent = n + " / " + MEM_THRESHOLD + " entries · flush at " + MEM_THRESHOLD;
     var list = $("memList");
     list.innerHTML = "";
-    if (n === 0) { list.innerHTML = '<div class="empty">empty — writes land here first</div>'; }
+    if (n === 0) { list.innerHTML = '<div class="empty">empty, writes land here first</div>'; }
     memtable.forEach(function(e){
       var li = document.createElement("li");
       if (e.tomb) li.className = "tomb";
