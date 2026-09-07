@@ -6,6 +6,7 @@
 <title>Keystone: a durable, ordered LSM-tree key-value store from scratch in Rust</title>
 <meta name="description" content="Keystone by Pavan Nallamothu: a durable, ordered, embedded key-value store written from scratch in pure Rust with zero dependencies. A real log-structured merge tree with a write-ahead log, leveled compaction, bloom filters, and exact crash recovery. Put keys, flush, compact, and trace a read live in your browser.">
 <meta name="author" content="Pavan Nallamothu (pavanchow)">
+<meta name="keywords" content="LSM tree, log-structured merge tree, key-value store, embedded database, Rust database, write-ahead log, SSTable, leveled compaction, bloom filter, crash recovery, memtable, tombstone, CRC, ordered store, RocksDB, LevelDB, from scratch, zero dependency, Pavan Nallamothu, pavanchow">
 <link rel="canonical" href="https://pavanchow.github.io/keystone/">
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="author" href="https://github.com/pavanchow">
@@ -17,7 +18,7 @@
 <meta name="twitter:title" content="Keystone: a durable, ordered LSM-tree key-value store from scratch in Rust">
 <meta name="twitter:description" content="A glass-box LSM tree you can read end to end. Watch the memtable fill, flush to L0, compact, and trace a Get.">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Keystone","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","description":"Keystone is a durable, ordered, embedded key-value store written from scratch in pure Rust with zero external dependencies. It is a real log-structured merge tree: writes go to a write-ahead log and an in-memory sorted table, flush to immutable on-disk sorted string tables, and merge downward through leveled compaction, with exact crash recovery.","url":"https://pavanchow.github.io/keystone/","author":{"@type":"Person","name":"Pavan Nallamothu"},"programmingLanguage":"Rust","codeRepository":"https://github.com/pavanchow/keystone","license":"https://opensource.org/licenses/MIT"}
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Keystone","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","softwareVersion":"0.1.0","description":"Keystone is a durable, ordered, embedded key-value store written from scratch in pure Rust with zero external dependencies. It is a real log-structured merge tree: writes go to a write-ahead log and an in-memory sorted table, flush to immutable on-disk sorted string tables, and merge downward through leveled compaction, with exact crash recovery.","url":"https://pavanchow.github.io/keystone/","author":{"@type":"Person","name":"Pavan Nallamothu"},"programmingLanguage":"Rust","codeRepository":"https://github.com/pavanchow/keystone","license":"https://opensource.org/licenses/MIT"}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Person","name":"Pavan Nallamothu","alternateName":"pavanchow","url":"https://github.com/pavanchow","sameAs":["https://github.com/pavanchow","https://hackerone.com/pavanchow"]}
@@ -260,6 +261,20 @@ footer a { font-weight: 500; }
   max-width: 90vw;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* nav version badge */
+.nav-v { font-family: var(--mono); font-size: 12px; color: var(--text-mute); }
+/* terminal snippet */
+.termi { max-width: 820px; margin: 0 auto; background: #15161c; color: #ececf4; border-radius: var(--radius-sm); padding: 20px 22px; font-family: var(--mono); font-size: 13px; line-height: 1.65; overflow-x: auto; }
+.termi .cm { color: #8a8d9a; } .termi .g { color: #7fd6a0; } .termi .p { color: #5cb0ff; } .termi .o { color: #d5d5dd; }
+/* comparison / surfaces rows */
+.cmp { max-width: 820px; margin: 0 auto; }
+.cmp .crow { display: grid; grid-template-columns: minmax(160px,1fr) 2fr; gap: 14px 34px; padding: 22px 0; border-top: 1px solid var(--border); }
+.cmp .crow:first-child { border-top: none; }
+.cmp .crow b { font-size: 17px; color: var(--text); }
+.cmp .crow p { margin: 0; color: var(--text-soft); font-size: 15px; }
+.cmp .crow code { font-family: var(--mono); font-size: .9em; background: var(--bg-sunken); padding: 1px 6px; border-radius: 6px; color: var(--text); }
+@media (max-width: 640px){ .cmp .crow { grid-template-columns: 1fr; gap: 6px; } }
 </style>
 </head>
 <body>
@@ -272,8 +287,10 @@ footer a { font-weight: 500; }
     <div class="nav-links">
       <a href="#playground">Playground</a>
       <a href="#how">How it works</a>
-      <a href="#durability">Durability</a>
+      <a href="#differs">How it differs</a>
+      <a href="#use">Use it</a>
       <a href="https://github.com/pavanchow/keystone">GitHub</a>
+      <span class="nav-v">v0.1.0</span>
     </div>
   </div>
 </nav>
@@ -393,6 +410,27 @@ footer a { font-weight: 500; }
   </div>
 </section>
 
+<section id="cli">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>The same store, from the command line</h2>
+      <p>The playground above is a teaching model. The real engine ships a <code>keystone</code> binary that operates over a directory: an ordered, durable store you drive with one command.</p>
+    </div>
+    <pre class="termi"><span class="cm"># every command operates over a --path directory</span>
+<span class="p">$</span> keystone --path ./data put user:1 alice
+<span class="p">$</span> keystone --path ./data put user:2 bob
+<span class="p">$</span> keystone --path ./data del user:1
+<span class="p">$</span> keystone --path ./data get user:1
+<span class="o">(not found)</span>
+<span class="p">$</span> keystone --path ./data get user:2
+<span class="g">bob</span>
+<span class="p">$</span> keystone --path ./data scan user:      <span class="cm"># keys in order, by prefix</span>
+<span class="o">user:2 = bob</span>
+<span class="p">$</span> keystone --path ./data verify          <span class="cm"># read every block, check its CRC</span>
+<span class="g">ok</span> all live tables verified, every block CRC checked</pre>
+  </div>
+</section>
+
 <section id="how">
   <div class="wrap">
     <div class="section-head">
@@ -431,6 +469,42 @@ footer a { font-weight: 500; }
         <p>Tombstones are kept while lower levels might still hold the deleted key. At the <b>bottom level</b> there is nothing below to shadow, so the tombstone and the dead key are dropped entirely. Watch the entry counts fall when you compact into the last level.</p>
       </div>
     </div>
+  </div>
+</section>
+
+<section id="differs">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>How it differs</h2>
+      <p>Keystone is not a new storage idea. It is the readable, zero-dependency version of the design that powers the production LSM stores, small enough to read end to end.</p>
+    </div>
+    <div class="cmp">
+      <div class="crow"><b>RocksDB, LevelDB</b><p>The production LSM engines: battle-tested, richly configurable, and large. Reading one to learn how an LSM tree actually works means wading through years of optimizations. Keystone is the same core design, a memtable, a WAL, immutable SSTables, leveled compaction, and bloom filters, in a single crate you can read in a sitting.</p></div>
+      <div class="crow"><b>Serialize a HashMap</b><p>The usual from-scratch store. It loses key order, loses data on a crash, and rewrites the whole file on every change. Keystone keeps keys sorted for range scans, logs every write before it acknowledges, and appends rather than rewriting.</p></div>
+      <div class="crow"><b>Embedded stores with big dep trees</b><p>Most Rust embedded stores pull in large dependency trees. Keystone is standard library only, zero external dependencies, with every on-disk structure checksummed and every length bounds-checked, so corrupt bytes surface as a clean error rather than a wrong answer.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="use">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>Use it</h2>
+      <p>A single crate, standard library only. Open a directory as a library, or drive the same engine from the command line.</p>
+    </div>
+    <div class="cmp">
+      <div class="crow"><b>Library API</b><p><code>Db::open</code> loads the manifest and replays the WAL; <code>put</code>, <code>delete</code>, <code>get</code>, and <code>scan</code> over any range; then <code>flush</code>, <code>compact</code>, <code>verify</code>, and <code>close</code>. Tunable <code>Options</code> for memtable size, block size, bloom bits per key, and sync on write.</p></div>
+      <div class="crow"><b>CLI binary</b><p><code>keystone --path DIR</code> with <code>put</code>, <code>get</code>, <code>del</code>, <code>scan</code> (all or by prefix), <code>compact</code>, <code>stats</code>, <code>verify</code>, and <code>demo</code>.</p></div>
+      <div class="crow"><b>Correctness gates</b><p>A differential fuzz against a <code>BTreeMap</code> oracle, crash-recovery tests including a torn WAL tail, and a corruption sweep that bit-flips and truncates every structure. All run under <code>cargo test</code>.</p></div>
+    </div>
+    <pre class="termi" style="margin-top:34px"><span class="cm"># build, test, and run the gates</span>
+cargo build
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo build --release
+
+<span class="cm"># scale the differential fuzz against the BTreeMap oracle</span>
+KEYSTONE_FUZZ_OPS=200000 cargo test --release differential</pre>
   </div>
 </section>
 
