@@ -418,16 +418,20 @@ footer a { font-weight: 500; }
     </div>
     <pre class="termi"><span class="cm"># every command operates over a --path directory</span>
 <span class="p">$</span> keystone --path ./data put user:1 alice
+<span class="g">ok</span>
 <span class="p">$</span> keystone --path ./data put user:2 bob
+<span class="g">ok</span>
 <span class="p">$</span> keystone --path ./data del user:1
+<span class="g">ok</span>
 <span class="p">$</span> keystone --path ./data get user:1
-<span class="o">(not found)</span>
+<span class="o">(nil)</span>
 <span class="p">$</span> keystone --path ./data get user:2
-<span class="g">bob</span>
+<span class="o">bob</span>
 <span class="p">$</span> keystone --path ./data scan user:      <span class="cm"># keys in order, by prefix</span>
-<span class="o">user:2 = bob</span>
+<span class="o">user:2=bob</span>
+<span class="o">1 pairs</span>
 <span class="p">$</span> keystone --path ./data verify          <span class="cm"># read every block, check its CRC</span>
-<span class="g">ok</span> all live tables verified, every block CRC checked</pre>
+<span class="o">ok: 3 tables, 3 entries verified</span></pre>
   </div>
 </section>
 
