@@ -6,6 +6,8 @@ Keystone is a durable, ordered, embedded key-value store written from scratch in
 
 **[Live demo](https://pavanchow.github.io/keystone/)** · MIT licensed · pure Rust, zero dependencies
 
+Built from scratch by [Pavan Nallamothu](https://pavanchow.github.io/) ([LinkedIn](https://www.linkedin.com/in/pavanchow/), [GitHub](https://github.com/pavanchow)).
+
 ## The gap it fills
 
 Most embedded stores in the Rust ecosystem pull in large dependency trees. Most from-scratch toy stores are an in-memory map serialized to a file, which loses ordering, loses crash safety, and rewrites the whole dataset on every change.
