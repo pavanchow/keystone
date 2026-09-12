@@ -1,9 +1,12 @@
 //! Command line interface for the Keystone key value store.
 #![warn(clippy::pedantic)]
 
+use std::io::Write;
 use std::process::exit;
+use std::time::Duration;
 
 use keystone::rng::Rng;
+use keystone::server::{Server, ServerConfig};
 use keystone::{Db, Options};
 
 fn usage() -> ! {
@@ -18,7 +21,11 @@ commands:\n\
   compact               run pending compactions\n\
   stats                 print level layout, file counts, sizes, seqno\n\
   verify                check every sstable block CRC and report integrity\n\
-  demo                  run a scripted workload and print the LSM state"
+  demo                  run a scripted workload and print the LSM state\n\
+  serve [--bind addr]   expose the store over TCP on a framed binary\n\
+                        protocol, default bind 127.0.0.1:7373, graceful\n\
+                        shutdown via KEYSTONE_SERVER_SHUTDOWN_FILE, see\n\
+                        DESIGN.md for the wire protocol and env knobs"
     );
     exit(2);
 }
@@ -129,8 +136,59 @@ fn run(args: &Args) -> keystone::Result<()> {
         "demo" => {
             run_demo(&args.path)?;
         }
+        "serve" => {
+            run_serve(&args.path, rest)?;
+        }
         _ => usage(),
     }
+    Ok(())
+}
+
+/// Size knob read from the environment, silently ignored when absent or not
+/// a plain number so a bad value can never stop the server from starting.
+fn env_usize(name: &str) -> Option<usize> {
+    std::env::var(name).ok().and_then(|v| v.parse::<usize>().ok())
+}
+
+fn run_serve(path: &str, args: &[String]) -> keystone::Result<()> {
+    let mut bind: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--bind" | "-b" => bind = Some(it.next().unwrap_or_else(|| usage()).clone()),
+            _ => usage(),
+        }
+    }
+    let mut config = ServerConfig::new().path(path);
+    if let Some(b) = bind {
+        config = config.bind(b);
+    }
+    if let Some(v) = env_usize("KEYSTONE_SERVER_MAX_FRAME") {
+        config = config.max_frame_bytes(v);
+    }
+    if let Some(v) = env_usize("KEYSTONE_SERVER_MAX_SCAN") {
+        config = config.max_scan_page(v);
+    }
+    if let Some(v) = env_usize("KEYSTONE_SERVER_MAX_TX") {
+        config = config.max_tx_bytes(v);
+    }
+    if let Some(v) = env_usize("KEYSTONE_SERVER_POLL_MS") {
+        config = config.poll_interval(Duration::from_millis(v.min(1000) as u64));
+    }
+    if let Ok(f) = std::env::var("KEYSTONE_SERVER_SHUTDOWN_FILE") {
+        config = config.shutdown_file(f);
+    }
+    let shutdown_hint = match &config.shutdown_file {
+        Some(f) => format!("touch {} to stop", f.display()),
+        None => String::from("set KEYSTONE_SERVER_SHUTDOWN_FILE to a path, then touch it, to stop"),
+    };
+    let server = Server::bind(config)?;
+    let addr = server.local_addr()?;
+    println!("keystone serve listening on {addr} path {path}");
+    println!("{shutdown_hint}, killing the process is always safe for acknowledged writes");
+    std::io::stdout().flush()?;
+    server.run()?;
+    println!("keystone serve stopped cleanly");
     Ok(())
 }
 
