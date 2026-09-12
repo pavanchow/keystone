@@ -33,6 +33,7 @@
 //! ```
 
 pub mod bloom;
+pub mod client;
 pub mod compaction;
 pub mod crc;
 pub mod db;
@@ -46,6 +47,7 @@ pub mod sstable;
 pub mod types;
 pub mod varint;
 pub mod wal;
+pub mod wire;
 
 pub use db::{Db, LevelStat, Scan, Stats, VerifyReport};
 pub use error::{Error, Result};

@@ -11,6 +11,8 @@ pub enum Error {
     Corruption(String),
     /// An argument or state precondition was violated.
     Invalid(String),
+    /// A network protocol frame or state machine step was violated.
+    Protocol(String),
 }
 
 /// Convenient result alias used throughout the crate.
@@ -22,6 +24,7 @@ impl fmt::Display for Error {
             Error::Io(e) => write!(f, "io error: {e}"),
             Error::Corruption(m) => write!(f, "corruption: {m}"),
             Error::Invalid(m) => write!(f, "invalid: {m}"),
+            Error::Protocol(m) => write!(f, "protocol: {m}"),
         }
     }
 }
