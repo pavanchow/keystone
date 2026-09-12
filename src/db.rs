@@ -12,7 +12,7 @@ use crate::manifest::{Manifest, TableMeta};
 use crate::memtable::MemTable;
 use crate::options::Options;
 use crate::sstable::{SsTableReader, SsTableWriter};
-use crate::types::{Entry, ValueType};
+use crate::types::{Entry, ValueType, WriteOp};
 use crate::wal::{WalReader, WalRecord, WalWriter};
 
 /// A durable, ordered, embedded LSM-tree key value store.
@@ -117,6 +117,50 @@ impl Db {
             value: value.to_vec(),
         })?;
         self.mem.put(key, value, seqno);
+        self.maybe_flush()?;
+        Ok(())
+    }
+
+    /// Apply a batch of writes as one unit.
+    ///
+    /// Every record is appended to the WAL first, the whole batch is made
+    /// durable with a single fsync, and only then are the records applied to
+    /// the memtable. A concurrent reader therefore never observes a partial
+    /// batch, and a batch of N writes costs one fsync instead of N. The last
+    /// write to a key inside the batch wins. Sequence numbers are consumed
+    /// for the whole batch even if the log append fails, because the records
+    /// already written stay in the log and replay on recovery.
+    pub fn write_batch(&mut self, ops: &[WriteOp]) -> Result<()> {
+        if ops.is_empty() {
+            return Ok(());
+        }
+        let first = self.next_seqno;
+        let records: Vec<WalRecord> = ops
+            .iter()
+            .enumerate()
+            .map(|(i, op)| match op {
+                WriteOp::Put { key, value } => WalRecord {
+                    kind: ValueType::Put,
+                    seqno: first + i as u64,
+                    key: key.clone(),
+                    value: value.clone(),
+                },
+                WriteOp::Delete { key } => WalRecord {
+                    kind: ValueType::Delete,
+                    seqno: first + i as u64,
+                    key: key.clone(),
+                    value: Vec::new(),
+                },
+            })
+            .collect();
+        self.next_seqno = first + records.len() as u64;
+        self.wal.append_batch(&records, self.opts.sync_on_write)?;
+        for rec in &records {
+            match rec.kind {
+                ValueType::Put => self.mem.put(&rec.key, &rec.value, rec.seqno),
+                ValueType::Delete => self.mem.delete(&rec.key, rec.seqno),
+            }
+        }
         self.maybe_flush()?;
         Ok(())
     }
@@ -315,6 +359,7 @@ fn clone_bound(b: Bound<&Vec<u8>>) -> Bound<Vec<u8>> {
     }
 }
 
+
 fn below_lower(key: &[u8], lo: &Bound<Vec<u8>>) -> bool {
     match lo {
         Bound::Included(v) => key < v.as_slice(),
@@ -368,5 +413,94 @@ impl Iterator for Scan {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("keystone-batch-{}-{}", std::process::id(), name))
+    }
+
+    fn small_opts() -> Options {
+        Options::new()
+            .memtable_size_bytes(2 * 1024)
+            .block_size(256)
+            .l0_compaction_trigger(3)
+    }
+
+    fn oracle_of(db: &mut Db) -> BTreeMap<Vec<u8>, Vec<u8>> {
+        db.scan(..).unwrap().map(|r| r.unwrap()).collect()
+    }
+
+    #[test]
+    fn batch_is_last_write_wins_and_survives_reopen() {
+        let dir = tmp("atomic");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut db = Db::open(&dir, small_opts()).unwrap();
+        db.put(b"a", b"old").unwrap();
+        db.put(b"b", b"keep").unwrap();
+        db.write_batch(&[]).unwrap();
+        let batch = vec![
+            WriteOp::Put {
+                key: b"a".to_vec(),
+                value: b"new".to_vec(),
+            },
+            WriteOp::Delete {
+                key: b"b".to_vec(),
+            },
+            WriteOp::Put {
+                key: b"c".to_vec(),
+                value: b"three".to_vec(),
+            },
+            WriteOp::Put {
+                key: b"a".to_vec(),
+                value: b"newest".to_vec(),
+            },
+        ];
+        db.write_batch(&batch).unwrap();
+        assert_eq!(db.get(b"a").unwrap(), Some(b"newest".to_vec()));
+        assert_eq!(db.get(b"b").unwrap(), None);
+        assert_eq!(db.get(b"c").unwrap(), Some(b"three".to_vec()));
+        let oracle = oracle_of(&mut db);
+        // Crash: drop the handle with no clean shutdown, then reopen.
+        drop(db);
+        let mut db = Db::open(&dir, small_opts()).unwrap();
+        assert_eq!(oracle_of(&mut db), oracle, "batch lost or torn on reopen");
+        // Sequence numbers continued past the batch.
+        db.put(b"d", b"four").unwrap();
+        assert_eq!(db.get(b"d").unwrap(), Some(b"four".to_vec()));
+        db.close().unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn large_batch_flushes_and_matches_oracle() {
+        let dir = tmp("large");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut db = Db::open(&dir, small_opts()).unwrap();
+        let mut oracle = BTreeMap::new();
+        let batch: Vec<WriteOp> = (0..500u32)
+            .map(|i| {
+                let key = format!("k{i:04}").into_bytes();
+                let value = format!("v{i}").into_bytes();
+                oracle.insert(key.clone(), value.clone());
+                WriteOp::Put { key, value }
+            })
+            .collect();
+        db.write_batch(&batch).unwrap();
+        assert_eq!(oracle_of(&mut db), oracle);
+        assert!(
+            db.stats().total_files > 0,
+            "a batch over the memtable budget must flush"
+        );
+        db.close().unwrap();
+        let mut db = Db::open(&dir, small_opts()).unwrap();
+        assert_eq!(oracle_of(&mut db), oracle);
+        db.close().unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

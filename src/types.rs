@@ -27,6 +27,26 @@ impl ValueType {
     }
 }
 
+/// A write operation for a batch, before a sequence number is assigned.
+///
+/// The engine stamps each operation with a sequence number when the batch is
+/// applied, so a batch is described purely in terms of user keys and values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteOp {
+    /// Insert or overwrite `key` with `value`.
+    Put {
+        /// The user key.
+        key: Vec<u8>,
+        /// The value bytes.
+        value: Vec<u8>,
+    },
+    /// Delete `key`, writing a tombstone.
+    Delete {
+        /// The user key.
+        key: Vec<u8>,
+    },
+}
+
 /// A single versioned record as produced by merge iteration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {

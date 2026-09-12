@@ -51,7 +51,7 @@ pub use db::{Db, LevelStat, Scan, Stats, VerifyReport};
 pub use error::{Error, Result};
 pub use options::Options;
 pub use rng::Rng;
-pub use types::{Entry, ValueType};
+pub use types::{Entry, ValueType, WriteOp};
 
 /// Alias for the primary engine type.
 pub type Keystone = Db;

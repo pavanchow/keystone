@@ -42,6 +42,15 @@ fn encode_payload(rec: &WalRecord) -> Vec<u8> {
     p
 }
 
+fn encode_frame(rec: &WalRecord) -> Vec<u8> {
+    let payload = encode_payload(rec);
+    let mut frame = Vec::with_capacity(8 + payload.len());
+    frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    frame.extend_from_slice(&crc32(&payload).to_le_bytes());
+    frame.extend_from_slice(&payload);
+    frame
+}
+
 fn decode_payload(payload: &[u8]) -> Result<WalRecord> {
     let mut pos = 0;
     let kind_byte = *payload
@@ -88,13 +97,25 @@ impl WalWriter {
 
     /// Append a single record, optionally fsyncing.
     pub fn append(&mut self, rec: &WalRecord) -> Result<()> {
-        let payload = encode_payload(rec);
-        let mut frame = Vec::with_capacity(8 + payload.len());
-        frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-        frame.extend_from_slice(&crc32(&payload).to_le_bytes());
-        frame.extend_from_slice(&payload);
-        self.file.write_all(&frame)?;
+        self.file.write_all(&encode_frame(rec))?;
         if self.sync {
+            self.file.sync_all()?;
+        }
+        Ok(())
+    }
+
+    /// Append several records with at most one fsync at the end.
+    ///
+    /// Every record is framed and checksummed exactly as in a single append.
+    /// With `sync` the log is flushed to stable storage once, after the last
+    /// record, so a batch becomes durable with one fsync instead of one per
+    /// record. The batch is still an ordered run of independent framed
+    /// records, so recovery replay treats it identically.
+    pub fn append_batch(&mut self, recs: &[WalRecord], sync: bool) -> Result<()> {
+        for rec in recs {
+            self.file.write_all(&encode_frame(rec))?;
+        }
+        if sync {
             self.file.sync_all()?;
         }
         Ok(())
