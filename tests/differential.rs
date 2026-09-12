@@ -18,14 +18,14 @@ fn run_seed(seed: u64, ops: usize) {
     let _ = std::fs::remove_dir_all(&dir);
 
     // Small thresholds so flushes and compactions actually fire during the run.
-    let opts = Options::new()
+    let options = Options::new()
         .memtable_size_bytes(2 * 1024)
         .block_size(256)
         .bloom_bits_per_key(10)
         .l0_compaction_trigger(3)
         .level_size_multiplier(3)
         .sync_on_write(false);
-    let mut db = Db::open(&dir, opts).unwrap();
+    let mut db = Db::open(&dir, options).unwrap();
     let mut oracle: BTreeMap<Vec<u8>, Vec<u8>> = BTreeMap::new();
 
     let mut rng = Rng::new(seed);
@@ -87,11 +87,11 @@ fn run_seed(seed: u64, ops: usize) {
 
 #[test]
 fn differential_against_btreemap() {
-    let ops: usize = std::env::var("KEYSTONE_FUZZ_OPS")
+    let op_count: usize = std::env::var("KEYSTONE_FUZZ_OPS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(2500);
     for seed in [1u64, 2, 7, 42, 12345] {
-        run_seed(seed, ops);
+        run_seed(seed, op_count);
     }
 }

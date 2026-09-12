@@ -421,10 +421,12 @@ fn garbage_files_never_panic() {
     let mut total = 0u64;
 
     for trial in 0..200 {
+        #[allow(clippy::cast_possible_truncation)] // len is bounded to 4096
         let len = (rng.below(4096) + 1) as usize;
         let mut bytes = vec![0u8; len];
+        #[allow(clippy::cast_possible_truncation)] // a byte is exactly the 0..256 range
         for b in &mut bytes {
-            *b = (rng.below(256)) as u8;
+            *b = rng.below(256) as u8;
         }
         let sst = dir.join("g.sst");
         let wal = dir.join("g.wal");
