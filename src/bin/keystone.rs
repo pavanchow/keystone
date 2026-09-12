@@ -175,6 +175,9 @@ fn run_serve(path: &str, args: &[String]) -> keystone::Result<()> {
     if let Some(v) = env_usize("KEYSTONE_SERVER_POLL_MS") {
         config = config.poll_interval(Duration::from_millis(v.min(1000) as u64));
     }
+    if let Some(v) = env_usize("KEYSTONE_SERVER_MEMTABLE") {
+        config = config.options(keystone::Options::new().memtable_size_bytes(v));
+    }
     if let Ok(f) = std::env::var("KEYSTONE_SERVER_SHUTDOWN_FILE") {
         config = config.shutdown_file(f);
     }
