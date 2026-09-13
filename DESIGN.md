@@ -1,6 +1,6 @@
 # Keystone design
 
-Keystone is a log-structured merge tree. This document describes the components, the exact on-disk byte layouts, the read path, the compaction strategy, the durability model, and an argument for why the two correctness gates actually prove correctness and durability.
+Keystone is a log-structured merge tree. This document describes the components, the exact on-disk byte layouts, the read path, the compaction strategy, the network server and its wire protocol, the durability model, and an argument for why the correctness gates actually prove correctness, durability, and robustness.
 
 ## Components
 
@@ -15,6 +15,9 @@ Keystone is a log-structured merge tree. This document describes the components,
 - `iter` is a k-way merge that yields the newest version per user key.
 - `compaction` is the leveled compaction driver.
 - `db` wires it all together into the engine.
+- `wire` is the framed binary protocol codec shared by the network client and server.
+- `client` is a blocking client that speaks the wire protocol over a `TcpStream`.
+- `server` is an embeddable TCP key-value server exposing one engine to many connections.
 
 ## Sequence numbers and MVCC
 
@@ -104,6 +107,63 @@ Every merge uses the k-way merge iterator, so for each user key only the newest 
 
 Compaction is triggered synchronously after a flush, so behavior is deterministic and testable without background threads.
 
+## Serving over the network
+
+The engine can be exposed to many processes at once through `keystone serve` or through the embeddable `keystone::server::Server`. The network surface uses only `std::net` and threads, no external crates, and it speaks a fully specified framed binary protocol.
+
+### Wire protocol
+
+Communication is a sequence of frames over a TCP connection. A frame is a little endian `u32` payload length followed by exactly that many payload bytes. A request payload is one operation tag byte followed by an operation specific body. A response payload is one status tag byte followed by a status specific body. Keys and values are length prefixed with LEB128 varints, the same encoding the on-disk formats use. All fixed width integers are little endian.
+
+Operations:
+
+| tag | name   | request body                          | ok response body |
+|-----|--------|---------------------------------------|------------------|
+| 1   | ping   | empty                                 | empty            |
+| 2   | put    | key, value                            | empty            |
+| 3   | get    | key                                   | value, or status 1 |
+| 4   | delete | key                                   | empty            |
+| 5   | scan   | low bound, high bound, u32 page limit | has-more, pairs  |
+| 6   | begin  | empty                                 | empty            |
+| 7   | commit | empty                                 | empty            |
+| 8   | abort  | empty                                 | empty            |
+| 9   | stats  | empty                                 | engine snapshot  |
+
+A key is a varint length followed by that many bytes. A value is a varint length followed by that many bytes. A bound is a kind byte, `0` unbounded, `1` included, `2` excluded, followed for kinds `1` and `2` by a key. A scan request carries the low bound, the high bound, then a `u32` page limit that the server clamps to its own cap. A scan answer carries a `u8` has-more flag, a varint pair count, then that many key value pairs. A scan page never exceeds the limit, plus one internal lookahead entry that is consumed but not sent, and its presence is what the has-more flag reports. A stats answer carries five `u64` fields, next sequence number, memtable keys, memtable bytes, total table files, total table bytes, then a `u32` level count and per level a `u32` level number with `u64` file count and `u64` bytes.
+
+Statuses are `0` ok, `1` not found, used only by get, and `2` error, whose body is a varint length prefixed UTF-8 message.
+
+The exact bytes of the smallest interesting exchange, a put of key `k` with value `v`:
+
+```
+02                put tag
+01 6b             key: length 1, "k"
+01 76             value: length 1, "v"
+payload:          02 01 6b 01 76
+full frame:       05 00 00 00 02 01 6b 01 76
+
+answer payload:   00
+answer frame:     01 00 00 00 00
+```
+
+Errors come in two classes with different consequences. A frame the server cannot parse at all, an empty payload, an unknown operation tag, a malformed body, a length prefix over the frame cap, gets one error frame and then the connection closes, because a client that emits unparseable bytes cannot be trusted to stay in sync. A semantic refusal, a commit with no open transaction, a transaction that overflowed its buffer, an engine error, gets an error frame and keeps the connection open. Every connection handler runs under a panic guard, a panic is counted on a shared counter rather than taking the server down, and the test gate asserts that adversarial input drives that counter to zero while the server keeps serving well behaved clients.
+
+Caps bound every allocation the wire can drive, the same discipline the on-disk readers apply. The default frame payload cap is 8 MiB, enforced by client and server alike before either allocates. The default scan page cap is 10,000 pairs. The default transaction buffer cap is 64 MiB. The `serve` subcommand reads `KEYSTONE_SERVER_MAX_FRAME`, `KEYSTONE_SERVER_MAX_SCAN`, `KEYSTONE_SERVER_MAX_TX`, `KEYSTONE_SERVER_POLL_MS`, `KEYSTONE_SERVER_MEMTABLE`, and `KEYSTONE_SERVER_SHUTDOWN_FILE` from the environment to override these.
+
+### Concurrency model
+
+The server spawns one thread per accepted connection, and every connection shares one engine through a `std::sync::Mutex`. The choice is deliberate. Engine access is bounded by WAL fsyncs, so serializing it costs little throughput. A threads plus mutex design needs no async runtime, no external crates, and no lock-free reasoning to be correct. And the engine API already takes `&mut self` for writes, which a mutex models exactly. A scan page is served under one lock hold bounded by the page limit, so a large scan never stalls writers for long.
+
+Each connection can open one write transaction with begin. While it is open, that connection's puts and deletes are buffered in memory, capped, and are invisible to every other client, because they have not touched the engine. Reads on the same connection see committed state only. Commit hands the buffer to `Db::write_batch` under a single lock acquisition. The engine appends every record to the WAL, fsyncs once, and only then applies the batch to the memtable, so no other client can ever observe a partial batch, and the whole batch costs one fsync instead of one per op. The last write to a key inside the batch wins. A transaction that exceeds its buffer cap is poisoned, its commit is refused, and the connection recovers by starting fresh.
+
+### Server durability contract
+
+Durability over the network is defined by one sentence: an ok response means the write is already fsynced to the write-ahead log, so the server can be killed at any instant and every acknowledged write survives.
+
+- A put or delete answered ok is durable before the answer was sent, because the engine fsyncs the WAL record before acknowledging when `sync_on_write` is on, which is the default. A hard kill, Ctrl-C, or a power cut costs at most the one op that was in flight and not yet acknowledged.
+- Writes buffered inside an open transaction are not yet durable, their per op ok means accepted, not committed. The commit ok is the durability point for the whole batch. A crash mid-commit can leave a prefix of the batch in the log, exactly like a sequence of independent puts cut short, and replay reconstructs that prefix record by record, never a torn value.
+- A graceful shutdown, through the shutdown file or the programmatic flag, stops accepting connections, lets idle connections close within about one read tick, joins every worker, and flushes the memtable before the process exits with status 0. Pure std Rust cannot intercept SIGINT, so Ctrl-C kills the process outright, and that is safe by the first bullet, the durability lives in the WAL, not in the shutdown path.
+
 ## Durability model
 
 Durability rests on four mechanisms.
@@ -121,6 +181,7 @@ Durability protects against a crash. Integrity protects against on-disk bytes th
 - Bounded allocation. Every decoder validates any length it reads against the file size or a fixed cap before it allocates. A corrupt SSTable footer whose index length has been flipped to a huge value is rejected by the footer CRC and the bounds check, not by an attempt to allocate terabytes. A corrupt WAL length prefix is capped and treated as a torn tail rather than a giant buffer.
 - Clean failure. A corrupt or truncated structure returns a `Corruption` error. The WAL is the one place that recovers by design, dropping the torn or corrupt tail so every intact earlier record survives. No decoder panics, overflows, hangs, or reads out of bounds on adversarial input.
 - Whole-store verify. `Db::verify`, exposed as the `verify` CLI command, opens every live table and reads every block end to end, which forces every block CRC and every entry decode, and reports the tables and entries checked or the first corruption found.
+- Bounded wire input. The server caps a frame length before allocating, decodes every operation body with checked bounds, refuses scan pages beyond its cap, and caps transaction buffers. Adversarial client bytes are handled exactly like adversarial on-disk bytes, rejected or answered with an error, never a panic or a huge allocation.
 
 ## Why the gates prove it
 
@@ -142,4 +203,12 @@ The clean-flush case flushes, confirms the WAL is empty, closes, and reopens to 
 
 The corruption gate builds a valid WAL, SSTable, and manifest, then mutates each one exhaustively. It flips a bit at every byte offset, truncates at every length, injects adversarial length prefixes, and throws random garbage files at every reader. For each mutation it runs the reader under a panic guard and classifies the outcome. The invariant is that reading corrupt bytes never panics and never returns wrong data. It either reproduces the original bytes exactly or fails with a clean error, and for the WAL it yields a prefix of the original records. Because every SSTable byte lives inside a CRC covered block or the checksummed footer, the sweep shows every SSTable mutation being detected rather than served as a wrong answer, which is exactly the property the block checksums exist to provide.
 
-Together the three gates cover what an LSM must get right. The differential gate proves the query semantics over the full layered structure, the recovery gate proves the on-disk state survives a crash and reloads to the same logical contents, and the corruption gate proves that damaged on-disk bytes fail loudly and safely instead of silently corrupting a read.
+### The server gate proves network robustness and kill durability
+
+The server gate runs everything over real 127.0.0.1 sockets against the real protocol, never a mocked transport. The round trip case pins the exact request and response bodies for every operation, including the missing key answer, bounded and unbounded scans, stats counters, and the transaction state machine with its semantic refusals. The concurrency case starts several real threads through a barrier so their writes interleave on the server, gives each thread a distinct key range and a local oracle, and then verifies the whole store through one client scan against the merged oracle, which exercises flushes and compactions happening underneath live network traffic.
+
+The malformed input case writes a length prefix over the cap, a frame that promises bytes it never sends, an unknown operation tag, truncated bodies, a bogus bound kind, an empty frame, and pure garbage. Every case must end with either an error frame or a clean close, the server must keep serving well behaved clients afterward, and the shared panic counter must read zero, which is the network mirror of the corruption gate's never panic invariant.
+
+The kill case spawns the actual `keystone serve` binary, writes a mixed put and delete stream with a small memtable so state spans SSTables and the live WAL, then sends SIGKILL with no shutdown path at all. Reopening the directory must reproduce the exact acknowledged state, which proves the durability contract, ack means fsynced, survives the harshest stop a supervisor or an operator can produce. A companion case stops the binary through the shutdown file and asserts a clean exit status, shutdown file removal, and a correct reopen.
+
+Together the four gates cover what a durable ordered store must get right, embedded or served. The differential gate proves the query semantics over the full layered structure, the recovery gate proves the on-disk state survives a crash and reloads to the same logical contents, the corruption gate proves that damaged on-disk bytes fail loudly and safely instead of silently corrupting a read, and the server gate proves that the network surface holds the same two properties while many clients hit one engine over real sockets.
